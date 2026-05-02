@@ -1,4 +1,4 @@
-import psycopg2
+import psycopg
 import re
 from sentence_transformers import SentenceTransformer
 

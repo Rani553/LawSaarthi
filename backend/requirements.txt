@@ -1,11 +1,9 @@
-# Lawsarthi Backend Dependencies
-
 # Flask Web Framework
 flask==3.0.0
 flask-cors==4.0.0
 
-# PostgreSQL with pgvector
-psycopg2-binary==2.9.9
+# PostgreSQL (FIXED - stable alternative)
+psycopg[binary]==3.1.18
 
 # Machine Learning - Sentence Embeddings
 sentence-transformers==2.2.2
