@@ -1,13 +1,10 @@
-# Flask Web Framework
 flask==3.0.0
 flask-cors==4.0.0
 
-# PostgreSQL (FIXED)
 psycopg[binary]
 
-# Machine Learning - Sentence Embeddings
 sentence-transformers==2.2.2
-torch>=2.0.0
+huggingface_hub==0.16.4
 
-# Utilities
+torch>=2.0.0
 python-dotenv==1.0.0
