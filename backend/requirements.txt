@@ -4,7 +4,9 @@ flask-cors==4.0.0
 psycopg[binary]
 
 sentence-transformers==2.2.2
+
+torch==2.1.2
+
 huggingface_hub==0.16.4
 
-torch>=2.0.0
 python-dotenv==1.0.0
