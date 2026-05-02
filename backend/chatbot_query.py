@@ -2,16 +2,20 @@ import psycopg2
 import re
 from sentence_transformers import SentenceTransformer
 
-# -----------------------------------
-# Load embedding model
-# -----------------------------------
 model = SentenceTransformer("all-MiniLM-L6-v2")
 
-SIMILARITY_THRESHOLD = 0.60
+SIMILARITY_THRESHOLD = 0.75
 
-# -----------------------------------
-# Database connection helper
-# -----------------------------------
+# Keywords that signal a constitutional question
+CONSTITUTION_KEYWORDS = [
+    "article", "constitution", "fundamental", "right", "rights", "directive",
+    "citizenship", "citizen", "migrant", "amendment", "parliament", "president",
+    "governor", "judiciary", "court", "preamble", "schedule", "part", "freedom",
+    "equality", "religion", "speech", "assembly", "property", "education",
+    "dpsp", "writ", "habeas", "mandamus", "certiorari", "suo motu", "legislature",
+    "executive", "federal", "union", "state", "emergency", "act", "law", "legal",
+]
+
 def get_db_connection():
     return psycopg2.connect(
         host="localhost",
@@ -20,58 +24,59 @@ def get_db_connection():
         password="newpassword"
     )
 
-# -----------------------------------
-# MAIN FUNCTION (Flask will call THIS)
-# -----------------------------------
+def is_constitutional_question(question: str) -> bool:
+    q = question.lower()
+    return any(kw in q for kw in CONSTITUTION_KEYWORDS)
+
 def query_articles(question: str) -> str:
-    conn = get_db_connection()
-    cur = conn.cursor()
     question_lower = question.lower().strip()
 
     # =====================================================
-    # STEP 1️⃣ Exact Article Number Match
+    # GUARD: Reject non-constitutional questions
     # =====================================================
-    match = re.search(r'article\s+(\d+[a-z]?)', question_lower)
+    if not is_constitutional_question(question_lower):
+        return "I can only answer questions related to the Indian Constitution."
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # =====================================================
+    # STEP 1: Exact Article Number Match
+    # Accepts: article1 / article 1 / article-1 / Article 1
+    # =====================================================
+    match = re.search(r'article\s*[-]?\s*(\d+[a-z]?)', question_lower)
     if match:
         article_no = match.group(1)
-
-        cur.execute("""
-            SELECT article, title, chunk
-            FROM articles
-            WHERE article = %s
-            LIMIT 1;
-        """, (article_no,))
+        cur.execute(
+            "SELECT article, title, chunk FROM articles WHERE article = %s LIMIT 1;",
+            (article_no,)
+        )
         row = cur.fetchone()
-
-        if row:
-            cur.close()
-            conn.close()
-            return f"📜 **Article {row[0]}: {row[1]}**\n\n{row[2]}"
-
-    # =====================================================
-    # STEP 2️⃣ Citizenship Articles (FULL TEXT)
-    # =====================================================
-    if any(word in question_lower for word in ["citizenship", "citizen", "migrant"]):
-        cur.execute("""
-            SELECT article, title, chunk
-            FROM articles
-            WHERE article IN ('5','6','7','8','9','10','11')
-            ORDER BY article::int
-        """)
-        rows = cur.fetchall()
         cur.close()
         conn.close()
-
-        if rows:
-            response = "📜 **Citizenship Articles (Part II of Indian Constitution)**\n\n"
-            for r in rows:
-                response += f"**Article {r[0]}: {r[1]}**\n{r[2]}\n\n"
-            return response
-        else:
-            return "❌ No citizenship articles found."
+        if row:
+            return f"📜 **Article {row[0]}: {row[1]}**\n\n{row[2]}"
+        return f"❌ Article {article_no} not found in the database."
 
     # =====================================================
-    # STEP 3️⃣ Semantic Search (pgvector)
+    # STEP 2: Citizenship — short summary
+    # =====================================================
+    if any(word in question_lower for word in ["citizenship", "citizen", "migrant"]):
+        cur.close()
+        conn.close()
+        return (
+            "📜 **Citizenship (Part II, Articles 5–11)**\n\n"
+            "**Article 5** — Citizenship at commencement: persons domiciled in India and born here or with a parent born here, or residing for 5+ years.\n\n"
+            "**Article 6** — Rights of migrants from Pakistan: persons who migrated before 19 July 1948 with a parent/grandparent born in undivided India.\n\n"
+            "**Article 7** — Rights of migrants to Pakistan: persons who migrated to Pakistan after 1 March 1947 but later returned on resettlement permits.\n\n"
+            "**Article 8** — Rights of overseas Indians: persons or their children/grandchildren born in India (as defined by the Government of India Act 1935) who are registered by a diplomatic/consular representative.\n\n"
+            "**Article 9** — No dual citizenship: a person who voluntarily acquires citizenship of a foreign state is not a citizen of India.\n\n"
+            "**Article 10** — Continuance of citizenship rights subject to any law made by Parliament.\n\n"
+            "**Article 11** — Parliament has the power to regulate the right of citizenship by law."
+        )
+
+    # =====================================================
+    # STEP 3: Semantic Search (pgvector)
     # =====================================================
     user_embedding = model.encode(question).tolist()
     emb_str = "[" + ",".join(map(str, user_embedding)) + "]"
@@ -82,22 +87,14 @@ def query_articles(question: str) -> str:
         FROM articles
         WHERE embedding IS NOT NULL
         ORDER BY embedding <#> '{emb_str}'::vector
-        LIMIT 5;
+        LIMIT 1;
     """)
 
-    results = cur.fetchall()
+    row = cur.fetchone()
     cur.close()
     conn.close()
 
-    # Filter only results above similarity threshold
-    filtered = [r for r in results if r[3] >= SIMILARITY_THRESHOLD]
-
-    if filtered:
-        # Return the top relevant article
-        row = filtered[0]
+    if row and row[3] >= SIMILARITY_THRESHOLD:
         return f"📜 **Article {row[0]}: {row[1]}**\n\n{row[2]}"
 
-    # =====================================================
-    # STEP 4️⃣ No Answer
-    # =====================================================
-    return "❌ No relevant constitutional article found."
+    return "❌ No relevant constitutional article found for your query. Please try rephrasing or ask about a specific article number."
